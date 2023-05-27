@@ -1,40 +1,56 @@
 from __future__ import absolute_import
 import octoprint.plugin
+import flask
+import subprocess
+import os
 
-class OctoButtonPlugin(octoprint.plugin.StartupPlugin,
-                       octoprint.plugin.TemplatePlugin,
-                       octoprint.plugin.SimpleApiPlugin,
-                       octoprint.plugin.AssetPlugin):
+class OctoPiRelayPlugin(octoprint.plugin.StartupPlugin,
+                        octoprint.plugin.TemplatePlugin,
+                        octoprint.plugin.AssetPlugin,
+                        octoprint.plugin.SettingsPlugin,
+                        octoprint.plugin.BlueprintPlugin):
 
-    # This method will run when OctoPrint starts up
     def on_after_startup(self):
-        self._logger.info("OctoButton Plugin started")
-
-    # This method is required for the TemplatePlugin mixin
-    # We will use it to inject our JavaScript file into the page
+        self._logger.info("OctoPiRelay Plugin started")
+        
     def get_template_configs(self):
         return [
             dict(type="settings", custom_bindings=False)
         ]
 
-    # This method is required for the AssetPlugin mixin
-    # We will use it to tell OctoPrint where our JavaScript file is
     def get_assets(self):
         return dict(
-            js=["js/octo_relay.js"]
+            js=["js/octopirelayplugin.js"]
         )
+    
+    def handle_output(self, process):
+        stdout, stderr = process.communicate()
+        self._logger.info(stdout.decode('utf-8'))
+        if stderr:
+            self._logger.error(stderr.decode('utf-8'))
 
-    # This method is required for the SimpleApiPlugin mixin
-    # We will use it to handle requests from our JavaScript
-    def on_api_command(self, command, data):
+    @octoprint.plugin.BlueprintPlugin.route("/relay", methods=["POST"])
+    def handle_relay(self):
+        relay_script_dir = os.path.dirname(os.path.realpath(__file__))
+        relay_script_path = os.path.join(relay_script_dir, "relaySwitch.py")
+
+        command = flask.request.json.get("command")
+        
         if command == "octo_relay_on":
-            self._logger.info("Running script...")
-            subprocess.Popen(["python", "/home/pi/relaySwitch.py", "-state on"])
+            self._logger.info("Turning on relay...")
+            p = subprocess.Popen(["python3", relay_script_path, "-state", "on"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.handle_output(p)
         elif command == "octo_relay_off":
-            subprocess.Popen(["python", "/home/pi/relaySwitch.py", "-state on"])
+            self._logger.info("Turning off relay...")
+            p = subprocess.Popen(["python3", relay_script_path, "-state", "off"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.handle_output(p)
+        else:
+            return flask.make_response("Unknown command", 400)
+        return flask.make_response("Success", 200)
 
-__plugin_name__ = "OctoButton"
+__plugin_name__ = "octopirelayplugin"
 __plugin_pythoncompat__ = ">=2.7,<4"
+
 def __plugin_load__():
     global __plugin_implementation__
-    __plugin_implementation__ = OctoButtonPlugin()
+    __plugin_implementation__ = OctoPiRelayPlugin()
